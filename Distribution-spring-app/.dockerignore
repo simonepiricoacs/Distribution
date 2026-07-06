@@ -1,3 +1,4 @@
+# NOTE: entrypoint.sh MUST be included in the build context (do not add it here).
 src/
 extraLib/
 .gradle/

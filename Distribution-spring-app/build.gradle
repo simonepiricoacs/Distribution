@@ -1,3 +1,9 @@
+import com.github.jengelman.gradle.plugins.shadow.transformers.PropertiesFileTransformer
+
+plugins {
+    id "com.github.johnrengelman.shadow" version "7.1.2"
+}
+
 dependencies {
     //SLF4J
     implementation group: 'org.slf4j', name: 'slf4j-api', version: project.slf4jVersion
@@ -10,14 +16,32 @@ dependencies {
     //Validation
     implementation group: 'jakarta.validation', name: 'jakarta.validation-api', version: project.jakartaValidationVersion
     implementation group: "org.passay", name: "passay", version: project.passayVersion
-    //Core Water Deps
-    implementation group: 'it.water.distribution', name: 'Water-distribution-spring', version: project.waterVersion
+    //Core + Implementation-spring bundle from the SINGLE in-build source: Distribution-spring.
+    //We consume its shadow springJar via a project() dependency on the dedicated consumable
+    //configuration (springDistributionElements) instead of the published Water-distribution-spring
+    //coordinate — this avoids the same-build build-order short-circuit while keeping one source of
+    //truth. Plain `implementation` (NOT the plugin's implementationInclude) is intentional: this
+    //module's fat jar is the shadowJar below, which already embeds runtimeClasspath and merges the
+    //Atteo META-INF/annotations index. implementationInclude would instead try to fold into the
+    //(disabled) standard jar and run the plugin's annotation-merge against a non-existent
+    //build/classes/.../META-INF/annotations dir (spring-app has no @FrameworkComponent of its own).
+    //The bundle is self-contained (Core, Implementation-spring, reflections) and non-transitive.
+    implementation project(path: ':Distribution-spring', configuration: 'springDistributionElements')
     // JPA Repository
-    implementation 'it.water.repository.jpa:JpaRepository-spring:'+project.waterVersion
+    // Exclude the transitive PUBLISHED Water-distribution-spring: Core+Implementation must come
+    // ONLY from the in-build project ':Distribution-spring' bundle above (single source of truth).
+    // The published coordinate is an older flat shadow jar (no POM deps) that also carries
+    // Core-testing-utils — excluding it removes both the duplicate Atteo index entries and the
+    // test-utils leak into the deployable.
+    implementation('it.water.repository.jpa:JpaRepository-spring:'+project.waterVersion) {
+        exclude group: 'it.water.distribution', module: 'Water-distribution-spring'
+    }
     //hibernate validator
     implementation group: "org.hibernate", name: "hibernate-validator", version: project.hibernateValidatorVersion
     //Rest Modules
-    implementation group: 'it.water.service.rest', name: 'Rest-spring-api', version: project.waterVersion
+    implementation(group: 'it.water.service.rest', name: 'Rest-spring-api', version: project.waterVersion) {
+        exclude group: 'it.water.distribution', module: 'Water-distribution-spring'
+    }
     //Spring Boot
     implementation group: 'org.springframework.boot', name: 'spring-boot-starter-aop', version: project.springBootVersion
     implementation group: 'org.springframework.data', name: 'spring-data-jpa', version: project.springBootVersion
@@ -39,10 +63,57 @@ test {
     useJUnitPlatform()
 }
 
+/**
+ * Fat JAR (no Spring Boot plugin): bundles all runtime dependencies into a single
+ * executable jar whose entry point is WaterLauncher. WaterLauncher prepares the
+ * /extlib URLClassLoader and then delegates to SpringApplication.run(WaterSpringApplication).
+ *
+ * Because every dependency jar is flattened into one archive, the per-jar service
+ * descriptors that would otherwise collide MUST be merged:
+ *  - META-INF/services/*                                  (mergeServiceFiles)
+ *  - META-INF/annotations/*  (Atteo ClassIndex, zero-reflection component discovery)
+ *  - Spring resource descriptors and auto-configuration imports
+ */
+shadowJar {
+    archiveClassifier.set('')
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE
+
+    manifest {
+        attributes 'Main-Class': 'it.water.distribution.spring.app.WaterLauncher'
+    }
+
+    // Standard JDK/Spring service files
+    mergeServiceFiles()
+    // Atteo ClassIndex annotation index (same strategy used by Distribution-osgi)
+    mergeServiceFiles {
+        path = '**/META-INF/annotations'
+    }
+
+    // Spring descriptors: plain-text lists must be concatenated, not overwritten
+    append 'META-INF/spring.handlers'
+    append 'META-INF/spring.schemas'
+    append 'META-INF/spring.tooling'
+    append 'META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports'
+    // spring.factories is a properties file with duplicate keys across jars -> merge values
+    transform(PropertiesFileTransformer) {
+        paths = ['META-INF/spring.factories']
+        mergeStrategy = 'append'
+    }
+
+    // Strip signatures from signed dependencies to avoid SecurityException at runtime
+    exclude 'META-INF/*.SF'
+    exclude 'META-INF/*.DSA'
+    exclude 'META-INF/*.RSA'
+}
+
+// The fat jar is the primary build artifact: disable the thin jar and wire shadowJar into the build
+jar.enabled = false
+tasks.assemble.dependsOn tasks.shadowJar
+
 publishing {
     publications {
         springApp(MavenPublication) {
-            from components.java
+            artifact tasks.shadowJar
         }
     }
 }

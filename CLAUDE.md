@@ -72,10 +72,25 @@ public class WaterSpringDistributionApp {
 server.port=8080
 spring.datasource.url=jdbc:h2:mem:waterdb;DB_CLOSE_DELAY=-1
 spring.jpa.hibernate.ddl-auto=create-drop
-water.keystore.file=classpath:keystore.jks
-water.keystore.password=changeit
+# Keystore for JWT signing — ALL keystore inputs are env-driven and fail-fast (no insecure defaults)
+water.keystore.file=${WATER_KEYSTORE_FILE}
+water.keystore.password=${WATER_KEYSTORE_PASSWORD}
+water.keystore.alias=${WATER_KEYSTORE_ALIAS:server-cert}
+water.private.key.password=${WATER_PRIVATE_KEY_PASSWORD}
 water.authentication.service.issuer=water
 ```
+
+### Keystore is fail-fast — no bundled keys (#1, #3)
+The deployable (`Distribution-spring-app`) **must** be given its keystore via environment:
+- `water.keystore.file=${WATER_KEYSTORE_FILE}` — **no** `:src/main/resources/certs` fallback (#1). A missing
+  `WATER_KEYSTORE_FILE` fails fast at startup instead of silently loading test certs shipped in the JAR.
+- `water.keystore.password` / `water.private.key.password` have **no** default either (#3) — a missing env var
+  fails fast rather than falling back to the well-known test password.
+
+Test keystores live **only under `src/test/resources/certs/`** across all modules (never `src/main/resources`),
+so no crypto material is packaged into the main/runtime JARs. The generator templates
+(`scaffolding/*/service-module*`) place `certs/` under `src/test` as well, so newly scaffolded modules stay clean.
+A real deployment provides its own keystore via `WATER_KEYSTORE_*` env vars.
 
 ## Distribution-quarkus
 

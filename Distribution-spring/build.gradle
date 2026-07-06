@@ -10,6 +10,14 @@ configurations {
         canBeConsumed(false)
         transitive false
     }
+    // Consumable variant exposing the shadow springJar to sibling projects in THIS build
+    // (e.g. Distribution-spring-app) via a project() dependency — without going through the
+    // published Water-distribution-spring coordinate (which would create a same-build
+    // build-order short-circuit). The ShadowJar and the Maven publication are left untouched.
+    springDistributionElements {
+        canBeResolved(false)
+        canBeConsumed(true)
+    }
 }
 
 dependencies {
@@ -22,7 +30,8 @@ dependencies {
     includeInJar group: 'it.water.core', name: 'Core-security', version: project.waterVersion
     includeInJar group: 'it.water.core', name: 'Core-service', version: project.waterVersion
     includeInJar group: 'it.water.core', name: 'Core-validation', version: project.waterVersion
-    includeInJar group: 'it.water.core', name: 'Core-testing-utils', version: project.waterVersion
+    // Core-testing-utils intentionally NOT bundled: this is a runtime distribution jar, test
+    // utilities must never leak into deployables (e.g. Distribution-spring-app) that consume it.
     includeInJar group: 'it.water.implementation', name: 'Implementation-spring', version: project.waterVersion
     includeInJar group: 'org.reflections', name: 'reflections', version: '0.10.2'
 }
@@ -41,6 +50,11 @@ task("springJar", type: ShadowJar) {
     mergeServiceFiles {
         path = '**/META-INF/annotations'
     }
+}
+
+// Expose the shadow springJar through the consumable configuration declared above.
+artifacts {
+    springDistributionElements(springJar)
 }
 
 jar {

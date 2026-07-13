@@ -70,8 +70,12 @@ command -v docker >/dev/null 2>&1 || die "docker non trovato nel PATH."
 if [ "$SKIP_BUILD" = false ]; then
     log "Build del fat jar via 'yo water:build --projects Distribution'..."
     command -v yo >/dev/null 2>&1 || die "yo non trovato nel PATH (richiesto per la build; usa --skip-build per saltarla)."
-    # La build del sottoprogetto Distribution produce build/libs/Distribution-spring-app-<ver>.jar
-    ( cd "$SCRIPT_DIR/.." && yo water:build --projects Distribution )
+    # yo water:build va eseguito dalla WORKSPACE ROOT (dove sta il .yo-rc.json), ovvero
+    # source/ = due livelli sopra questo script (source/Distribution/Distribution-spring-app),
+    # NON source/Distribution: da lì yo non trova il workspace e fallisce con
+    # "You must be in your workspace!". La build del sottoprogetto Distribution produce
+    # build/libs/Distribution-spring-app-<ver>.jar
+    ( cd "$SCRIPT_DIR/../.." && yo water:build --projects Distribution )
 else
     log "--skip-build: salto la compilazione del jar."
 fi

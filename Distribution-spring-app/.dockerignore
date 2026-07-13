@@ -1,6 +1,10 @@
 # NOTE: entrypoint.sh MUST be included in the build context (do not add it here).
+# extraLib/ and baseLib/ are LOCAL-run only: in the image /extlib and /baselib are
+# auto-populated (entrypoint downloads WATER_MODULES; Dockerfile seeds /baselib), so the
+# in-repo folders must NOT enter the Docker build context.
 src/
 extraLib/
+baseLib/
 .gradle/
 .idea/
 *.md

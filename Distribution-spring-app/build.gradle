@@ -123,3 +123,42 @@ waterDescriptor {
     displayName = 'Distribution Spring Application'
     description = 'Minimal Spring Boot application with Water Framework enabled'
 }
+
+// ---------------------------------------------------------------------------
+// Local run (NOT the container).
+//
+// In Docker, /baselib and /extlib are AUTO-POPULATED — the Dockerfile seeds /baselib with
+// javax.servlet-api and entrypoint.sh downloads WATER_MODULES into /extlib — so the in-repo
+// baseLib/ and extraLib/ folders are excluded from the build context (.dockerignore) and never
+// enter the image or the published fat jar. They exist ONLY to reproduce that layout when the
+// app is started locally:
+//
+//   - baseLib/*.jar -> placed on the launch (system) classpath, i.e. the SAME classloader as
+//                      Spring, mirroring the container /baselib. Required e.g. for
+//                      javax.servlet-api: the Water *-service-spring controllers extend JAX-RS/CXF
+//                      controllers carrying a `@Context javax.servlet.http.HttpServletRequest`
+//                      field, so without it Spring introspection fails at startup with
+//                      NoClassDefFoundError: javax/servlet/http/HttpServletRequest.
+//   - extraLib/     -> exposed via EXTRA_CLASSPATH_DIR so WaterLauncher loads those module jars
+//                      into its isolated CHILD classloader, mirroring the container /extlib.
+//
+// Because these jars are added to THIS task's classpath only (not to sourceSets/shadowJar), they
+// can never leak into the fat jar or the Docker image.
+//
+// Usage: yo water:build (or gradlew) then `./gradlew :Distribution-spring-app:runLocal`
+// (a keystore is still required: export WATER_KEYSTORE_FILE / *_PASSWORD before running).
+// ---------------------------------------------------------------------------
+tasks.register('runLocal', JavaExec) {
+    group = 'application'
+    description = 'Runs WaterLauncher locally, seeding baseLib/ onto the Spring/system classloader and extraLib/ as the WaterLauncher child loader (mirrors the container /baselib + /extlib, which in Docker are auto-populated).'
+    mainClass.set('it.water.distribution.spring.app.WaterLauncher')
+    // Both dirs are env-configurable, mirroring the container BASE_CLASSPATH_DIR / EXTRA_CLASSPATH_DIR.
+    // BASE_CLASSPATH_DIR -> jars added to THIS launch classpath (same loader as Spring). It is honored
+    //   here (and by entrypoint.sh) because WaterLauncher itself does NOT read it — the base classpath
+    //   is assembled by whoever launches the JVM.
+    // EXTRA_CLASSPATH_DIR -> forwarded as an env var; WaterLauncher reads it to build its child loader.
+    def baseDir  = System.getenv('BASE_CLASSPATH_DIR')  ?: "${projectDir}/baseLib"
+    def extraDir = System.getenv('EXTRA_CLASSPATH_DIR') ?: "${projectDir}/extraLib"
+    classpath = sourceSets.main.runtimeClasspath + files(fileTree(dir: baseDir, include: '*.jar'))
+    environment 'EXTRA_CLASSPATH_DIR', extraDir
+}

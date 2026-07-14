@@ -42,36 +42,59 @@ public class WaterLauncher {
     }
 
     static URLClassLoader buildAndSetExtendedClassLoader() throws IOException {
-        String extraDir = resolveExtraClasspathDir();
-
-        if (extraDir.isBlank()) {
-            log.info("[ExtraClasspath] No extra classpath directory configured (water.extra.classpath.dir is empty)");
-            return null;
-        }
-
-        File dir = new File(extraDir);
-        if (!dir.isDirectory()) {
-            log.warn("[ExtraClasspath] Configured directory does not exist or is not a directory: {}", extraDir);
-            return null;
-        }
-
-        File[] jars = dir.listFiles(f -> f.getName().endsWith(".jar"));
-        if (jars == null || jars.length == 0) {
-            log.info("[ExtraClasspath] Directory found but contains no .jar files: {}", extraDir);
-            return null;
-        }
-
         List<URL> extraUrls = new ArrayList<>();
-        for (File jar : jars) {
-            extraUrls.add(jar.toURI().toURL());
-            log.info("[ExtraClasspath] Adding JAR: {}", jar.getName());
+
+        // BASE classpath dir (BASE_CLASSPATH_DIR, default /baselib): jars that must be visible to the
+        // (child-loaded) *-service-spring controllers alongside Spring — e.g. javax.servlet-api, whose
+        // absence triggers NoClassDefFoundError: javax/servlet/http/HttpServletRequest during Spring
+        // bean introspection. In the container these are ALSO on the SYSTEM classpath (-cp assembled by
+        // entrypoint.sh), so re-adding them here is harmless (parent-first delegation wins); for a plain
+        // local / IDE launch (where no -cp is injected) this is what actually makes them loadable.
+        addJarsFromDir(resolveBaseClasspathDir(), "BaseClasspath", extraUrls);
+        // EXTRA classpath dir (EXTRA_CLASSPATH_DIR, default /extlib): the Water module jars.
+        addJarsFromDir(resolveExtraClasspathDir(), "ExtraClasspath", extraUrls);
+
+        if (extraUrls.isEmpty()) {
+            log.info("[ExtraClasspath] No base/extra JAR configured (BASE_CLASSPATH_DIR / EXTRA_CLASSPATH_DIR empty or with no jars)");
+            return null;
         }
 
         ClassLoader parent = Thread.currentThread().getContextClassLoader();
         URLClassLoader extLoader = new URLClassLoader(extraUrls.toArray(new URL[0]), parent);
         Thread.currentThread().setContextClassLoader(extLoader);
-        log.info("[ExtraClasspath] {} JAR(s) loaded from: {}", jars.length, extraDir);
+        log.info("[ExtraClasspath] {} JAR(s) loaded onto the extended classloader", extraUrls.size());
         return extLoader;
+    }
+
+    /**
+     * Adds every {@code *.jar} found directly in {@code dir} to {@code urls}. Missing/empty dirs are
+     * logged and skipped (not an error): a deployment may configure only one of base/extra.
+     */
+    private static void addJarsFromDir(String dir, String label, List<URL> urls) throws IOException {
+        if (dir == null || dir.isBlank()) {
+            log.info("[{}] No directory configured", label);
+            return;
+        }
+        File d = new File(dir);
+        if (!d.isDirectory()) {
+            log.warn("[{}] Directory does not exist or is not a directory: {}", label, dir);
+            return;
+        }
+        File[] jars = d.listFiles(f -> f.getName().endsWith(".jar"));
+        if (jars == null || jars.length == 0) {
+            log.info("[{}] Directory found but contains no .jar files: {}", label, dir);
+            return;
+        }
+        for (File jar : jars) {
+            urls.add(jar.toURI().toURL());
+            log.info("[{}] Adding JAR: {}", label, jar.getName());
+        }
+    }
+
+    static String resolveBaseClasspathDir() {
+        String val = System.getenv("BASE_CLASSPATH_DIR");
+        if (val == null) val = System.getProperty("BASE_CLASSPATH_DIR");
+        return val != null ? val : "/baselib";
     }
 
     static String resolveExtraClasspathDir() {

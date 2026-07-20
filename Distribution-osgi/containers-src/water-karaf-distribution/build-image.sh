@@ -32,6 +32,12 @@ cd "$SCRIPT_DIR"
 
 IMAGE_NAME="water-osgi-container"
 VERSION="3.0.0"
+# Karaf version usata per interpolare il pom (allineata a WaterWorkspaceGradlePlugin/versions.properties: karafVersion).
+# Il pom.xml del modulo definisce water.version/karaf.version in modo auto-referenziale
+# (<water.version>${water.version}</water.version>), quindi DEVONO essere passate a mvn via -D
+# (come fa Distribution-osgi/build.gradle: mvn ... -Dkaraf.version -Dwater.version), altrimenti
+# Maven fallisce con "recursive expression cycle in 'karaf.version'/'water.version'".
+KARAF_VERSION="4.4.6"
 SKIP_BUILD=false
 EXTRA_TAGS=()
 
@@ -83,8 +89,9 @@ command -v docker >/dev/null 2>&1 || die "docker non trovato nel PATH."
 # ---------------------------------------------------------------------------
 if [ "$SKIP_BUILD" = false ]; then
     command -v mvn >/dev/null 2>&1 || die "mvn non trovato nel PATH (richiesto per la build; usa --skip-build per saltarla)."
-    log "Build della distribuzione Karaf via 'mvn clean install'..."
-    mvn -f "$SCRIPT_DIR/pom.xml" clean install -DskipTests
+    log "Build della distribuzione Karaf via 'mvn clean install' (water.version=${VERSION}, karaf.version=${KARAF_VERSION})..."
+    mvn -f "$SCRIPT_DIR/pom.xml" clean install -DskipTests \
+        -Dwater.version="$VERSION" -Dkaraf.version="$KARAF_VERSION"
 else
     log "--skip-build: salto la compilazione della distribuzione."
 fi

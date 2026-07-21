@@ -59,6 +59,13 @@ EXPOSE 8080
 #                           classpath (shared with Spring) — use for JDBC drivers and other libs Spring must see
 #   WATER_MAVEN_REPO_<n>_URL / _USER / _PASSWORD = repositories tried in order (failover, first HTTP 200 wins)
 #                                                   USER/PASSWORD optional per repo
+#
+# WATER_AUTHENTICATION_SERVICE_ISSUER: the issuer name the AuthenticationProvider is looked up by at login
+#   (AuthenticationSystemServiceImpl matches provider.issuersNames().contains(issuer)). It MUST equal the value
+#   declared by the provider — for the User module that is WaterUser.WATER_USER_ISSUER = it.water.core.api.model.User.
+#   Do NOT set it to the property key ("water.authentication.service.issuer") or login fails with
+#   "No authentication provider found for ...". Leave this default and do not override it in compose unless you
+#   register a custom AuthenticationProvider with a different issuer.
 ENV SERVER_PORT=8080 \
     SERVER_SERVLET_CONTEXT_PATH=/water \
     EXTRA_CLASSPATH_DIR=/extlib \
@@ -68,6 +75,7 @@ ENV SERVER_PORT=8080 \
     WATER_BASE_MODULES="" \
     WATER_MAVEN_REPO_1_URL="https://nexus.acsoftware.it/nexus/repository/maven-water/" \
     WATER_MAVEN_REPO_2_URL="file:///m2/repository" \
+    WATER_AUTHENTICATION_SERVICE_ISSUER=it.water.core.api.model.User \
     WATER_TEST_MODE=false \
     WATER_KEYSTORE_TYPE=jks \
     WATER_KEYSTORE_PASSWORD=water. \

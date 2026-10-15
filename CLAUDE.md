@@ -26,7 +26,7 @@ Assembles all Water Framework modules into deployable artifacts for each support
 ### JAR Merging Strategy (Gradle Shadow)
 The OSGi distribution merges all module JARs into a single uber-JAR:
 - **Atteo ClassIndex consolidation**: `META-INF/annotations/*.list` files are merged across all modules — critical for zero-reflection component discovery
-- **OSGi manifest headers**: `Bundle-SymbolicName`, `Export-Package`, `Import-Package` are computed from merged contents
+- **OSGi manifest headers**: `Bundle-SymbolicName`, `Export-Package`, `Import-Package` are NOT computed from the merged content — the whole manifest is copied from `Implementation-osgi` by the `extractManifest` task. Whatever that bundle does not export, the uber-bundle does not export either (see Build Order below)
 - **zip64**: enabled to handle large jar counts exceeding standard ZIP limits
 
 ### Karaf Container Assembly
@@ -169,21 +169,38 @@ karaf> feature:install water-core water-persistence water-rest water-user-manage
 
 ## Build Order (Full Rebuild)
 
-When rebuilding from scratch (e.g., after a `Core` change), build in dependency order:
+When rebuilding from scratch (e.g., after a `Core` change), build in dependency order — always with
+the generator, never `./gradlew` directly:
+
 ```bash
-./gradlew Core:publishToMavenLocal -x test
-./gradlew Implementation:publishToMavenLocal -x test
-./gradlew Repository:publishToMavenLocal -x test
-./gradlew JpaRepository:publishToMavenLocal -x test
-./gradlew Rest:publishToMavenLocal -x test
-# ... other modules ...
-./gradlew Distribution:build
+yo water:build --projects Core,Implementation,Repository,JpaRepository,Distribution,Rest
+# add --withTests to run tests (the default is -x test)
 ```
 
-Or using the Water generator:
-```bash
-yo water:build --projects=Core,Implementation,Repository,JpaRepository,Rest,Distribution
-```
+`Distribution` comes **before** `Rest`: `Rest-spring-api` compiles against
+`Water-distribution-spring`, not against `Core-api`. If `Rest` itself changed and the distribution
+must ship it, rebuild `Distribution` again afterwards.
+
+### `Implementation` must be rebuilt before `Distribution`
+
+Both `osgiJar` and `springJar` merge their inputs with `duplicatesStrategy =
+DuplicatesStrategy.INCLUDE`, so when two inputs carry the same class one copy silently wins.
+`Implementation-osgi` is not a thin adapter: it embeds ~367 `it/water/core/**` classes. Rebuilding
+`Core` and then `Distribution` while skipping `Implementation` therefore produces an uber-bundle in
+which the **old** Core classes shadow the new ones — the build is green and the Karaf container runs
+the previous code. `Implementation-spring` embeds no Core classes, so this affects OSGi only.
+
+To check what a bundle really contains, extract the class and inspect it with `javap` instead of
+trusting the sources.
+
+### New packages in `Core-api` need the full chain
+
+The uber-bundle's OSGi manifest — `Export-Package` included — is **copied verbatim from
+`Implementation-osgi`** by the `extractManifest` task, not computed from the merged content. A
+package added to `Core-api` is therefore invisible to OSGi until `Implementation` **and**
+`Distribution` are rebuilt. The symptom is a container that never boots, with
+`Unable to resolve <bundle>: missing requirement osgi.wiring.package=<new.package>` and
+`gave up waiting for service org.apache.karaf.features.BootFinished` in the Pax Exam log.
 
 ## Dependencies
 - All Water framework modules (Core, Implementation, Repository, JpaRepository, Rest, Authentication, User, Role, Permission, ...)
